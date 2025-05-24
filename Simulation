@@ -1,0 +1,200 @@
+<!-- Save this as index.html and open in your browser -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rayleigh Scattering Simulation</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 8px;
+    }
+    button, input[type=range] {
+      padding: 10px;
+      font-size: 16px;
+      background-color: orange;
+      border: none;
+      border-radius: 5px;
+      margin: 5px 0;
+      cursor: pointer;
+    }
+    @media (max-width: 600px) {
+      #controls {
+        width: 90vw;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h2>Rayleigh Scattering</h2>
+    <button onclick="startRecursiveScattering()">Start</button>
+    <button onclick="stopScattering()">Stop</button>
+    <button onclick="resetScene()">Reset</button>
+    <button onclick="toggleBeakerColors()">Toggle Colors</button>
+    <label>Speed (ms)</label>
+    <input type="range" id="speedRange" min="100" max="2000" value="1000" step="100" oninput="updateSpeed(this.value)">
+    <span id="speedLabel">1000ms</span>
+  </div>
+  <div id="container"></div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+    let scene, camera, renderer, scatteredLines = [], autoSimulate = false;
+    let scatterDelay = 1000, particleFactor = 1;
+    let hoverObjects = [], beakerMaterials = {}, colorMode = false;
+
+    init();
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 20, 100);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.getElementById("container").appendChild(renderer.domElement);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+      scene.add(ambientLight);
+
+      addLightSource();
+      addTableWithLegs();
+      addBeakers();
+
+      window.addEventListener('resize', onResize);
+      animate();
+    }
+
+    function addLightSource() {
+      const light = new THREE.Mesh(
+        new THREE.SphereGeometry(2, 32, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      light.position.set(-40, 0, 0);
+      scene.add(light);
+    }
+
+    function addTableWithLegs() {
+      const mat = new THREE.MeshStandardMaterial({ color: 0x552200 });
+      const table = new THREE.Mesh(new THREE.BoxGeometry(80, 2, 40), mat);
+      table.position.set(0, -10, 0);
+      scene.add(table);
+
+      const legGeo = new THREE.BoxGeometry(2, 20, 2);
+      const legPos = [[-39, -21, -19], [39, -21, -19], [-39, -21, 19], [39, -21, 19]];
+      legPos.forEach(p => {
+        const leg = new THREE.Mesh(legGeo, mat);
+        leg.position.set(...p);
+        scene.add(leg);
+      });
+    }
+
+    function addBeakers() {
+      const cyl = new THREE.CylinderGeometry(5, 5, 15, 32, 1, true);
+      const mat = new THREE.MeshPhysicalMaterial({ color: 0xaaaaaa, transmission: 1, roughness: 0.1, thickness: 1, transparent: true });
+
+      const b1 = new THREE.Mesh(cyl, mat);
+      b1.position.set(-15, -7.5, 0);
+      scene.add(b1);
+
+      const b2 = new THREE.Mesh(cyl, mat.clone());
+      b2.position.set(15, -7.5, 0);
+      scene.add(b2);
+
+      const water = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 13.5, 32), new THREE.MeshStandardMaterial({ color: 0x44aaff, transparent: true, opacity: 0.5 }));
+      water.position.copy(b1.position);
+      scene.add(water);
+
+      const milk = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 4.5, 13.5, 32), new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 }));
+      milk.position.copy(b2.position);
+      scene.add(milk);
+
+      beakerMaterials.left = water.material;
+      beakerMaterials.right = milk.material;
+    }
+
+    function simulateScattering() {
+      const wavelengths = [
+        { color: 0xff0000, wavelength: 650 },
+        { color: 0x00ff00, wavelength: 550 },
+        { color: 0x0000ff, wavelength: 450 }
+      ];
+      wavelengths.forEach(w => {
+        for (let i = 0; i < 5 * particleFactor; i++) {
+          const yOffset = Math.random() * 30 - 15;
+          const endY = yOffset + (1e5 / Math.pow(w.wavelength, 3)) * (Math.random() - 0.5);
+          const points = [new THREE.Vector3(-40, 0, 0), new THREE.Vector3(50, endY, 0)];
+          const mat = new THREE.LineBasicMaterial({ color: w.color, transparent: true, opacity: Math.min(1, 1e9 / Math.pow(w.wavelength, 4)) });
+          const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), mat);
+          scene.add(line);
+          scatteredLines.push(line);
+        }
+      });
+      particleFactor++;
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+
+    function startRecursiveScattering() {
+      autoSimulate = true;
+      (function loop() {
+        if (!autoSimulate) return;
+        simulateScattering();
+        setTimeout(loop, scatterDelay);
+      })();
+    }
+
+    function stopScattering() {
+      autoSimulate = false;
+    }
+
+    function resetScene() {
+      stopScattering();
+      scatteredLines.forEach(line => scene.remove(line));
+      scatteredLines = [];
+      particleFactor = 1;
+    }
+
+    function updateSpeed(value) {
+      scatterDelay = parseInt(value);
+      document.getElementById("speedLabel").textContent = value + "ms";
+    }
+
+    function toggleBeakerColors() {
+      colorMode = !colorMode;
+      beakerMaterials.left.color.set(colorMode ? 0xffcc88 : 0x44aaff);
+      beakerMaterials.right.color.set(colorMode ? 0xff9933 : 0xffffff);
+    }
+
+    function onResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+  </script>
+</body>
+</html>
